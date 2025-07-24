@@ -4,6 +4,7 @@ namespace Hipay\HipayMultibancoGateway\Controller\Notify;
 use Magento\Framework\App\Action\Action as AppAction;
 use Magento\Framework\App\Action\Context;
 use Magento\Framework\App\Request\Http as HttpRequest;
+use Psr\Log\LoggerInterface;
 
 class Index extends AppAction
 {
@@ -20,51 +21,72 @@ class Index extends AppAction
     protected $_credentials;
  	protected $_payment;
  	protected $_entity;
+ 	protected $_logger;
  	
-    public function __construct(
-		\Magento\Framework\App\Action\Context $context
-    ) {
+    public function __construct(\Magento\Framework\App\Action\Context $context, LoggerInterface $logger) {
 		
         parent::__construct($context);
         $this->_messageManager = $context->getMessageManager();
+        $this->_logger = $logger;
     }
     
     public function execute()
     {
+		try {
 		
-		if(!isset($_GET["order"])) {
-			return;
-		};
-		
-		$idformerchant = $_GET["order"];
-		$reference = $_GET["ref"];
-		$entity = $_GET["ent"]; 
-
-		$this->_order = $this->_objectManager->create('\Magento\Sales\Model\Order')->loadByIncrementId($idformerchant);
-		$this->_payment = $this->_order->getPayment();
-	
-		$storeScope = \Magento\Store\Model\ScopeInterface::SCOPE_STORES;
-		$this->_sandbox 		= $this->_objectManager->get('Magento\Framework\App\Config\ScopeConfigInterface')->getValue('payment/hipay_multibanco_gateway/sandbox',$storeScope);
-		$this->_entity	 		= $this->_objectManager->get('Magento\Framework\App\Config\ScopeConfigInterface')->getValue('payment/hipay_multibanco_gateway/payment_entity',$storeScope);
-		if ($this->_sandbox)
-			$this->_credentials		= $this->_objectManager->get('Magento\Framework\App\Config\ScopeConfigInterface')->getValue('payment/hipay_multibanco_gateway/api_sandbox' ,$storeScope);
-		else
-			$this->_credentials		= $this->_objectManager->get('Magento\Framework\App\Config\ScopeConfigInterface')->getValue('payment/hipay_multibanco_gateway/api_production',$storeScope);
-		
-		$hipayTransaction = $this->getTransactionStatus($reference);
-		
-		if ($hipayTransaction ){
-
-			echo " AND CAPTURE!";
-			if ($this->_order->getState() != \Magento\Sales\Model\Order::STATE_CANCELED && $this->_order->getState() != \Magento\Sales\Model\Order::STATE_PROCESSING){
-				$this->_order->setState(\Magento\Sales\Model\Order::STATE_PROCESSING)->setStatus("processing");
-				$comment = "Captured, " . date('Y-m-d H:i:s');
-				$this->_order->addStatusHistoryComment($comment)->setIsCustomerNotified(true)->setEntityName('order');
-				$this->_order->save();
-			}	
+			header('HTTP/1.1 402 Payment Required');
+			if(!isset($_GET["order"])) {
+				return;
+			};
 			
-		} 
+			$idformerchant = $_GET["order"];
+			$reference = $_GET["ref"];
+			$entity = $_GET["ent"]; 
 
+			$this->_order = $this->_objectManager->create('\Magento\Sales\Model\Order')->loadByIncrementId($idformerchant);
+			$this->_payment = $this->_order->getPayment();
+		
+			$storeScope = \Magento\Store\Model\ScopeInterface::SCOPE_STORES;
+			$this->_sandbox 		= $this->_objectManager->get('Magento\Framework\App\Config\ScopeConfigInterface')->getValue('payment/hipay_multibanco_gateway/sandbox',$storeScope);
+			$this->_entity	 		= $this->_objectManager->get('Magento\Framework\App\Config\ScopeConfigInterface')->getValue('payment/hipay_multibanco_gateway/payment_entity',$storeScope);
+			if ($this->_sandbox)
+				$this->_credentials		= $this->_objectManager->get('Magento\Framework\App\Config\ScopeConfigInterface')->getValue('payment/hipay_multibanco_gateway/api_sandbox' ,$storeScope);
+			else
+				$this->_credentials		= $this->_objectManager->get('Magento\Framework\App\Config\ScopeConfigInterface')->getValue('payment/hipay_multibanco_gateway/api_production',$storeScope);
+			
+			$hipayTransaction = $this->getTransactionStatus($reference);
+			
+			if ($hipayTransaction ){
+
+				$this->_logger->info("Multibanco Transaction identified for capture" . $idformerchant);
+				echo "Multibanco Transaction identified for capture " . $idformerchant . PHP_EOL;
+				if ($this->_order->getState() != \Magento\Sales\Model\Order::STATE_CANCELED && $this->_order->getState() != \Magento\Sales\Model\Order::STATE_PROCESSING && $this->_order->getState() != \Magento\Sales\Model\Order::STATE_COMPLETE){
+					$this->_order->setState(\Magento\Sales\Model\Order::STATE_PROCESSING)->setStatus("processing");
+					$comment = "Captured, " . date('Y-m-d H:i:s');
+					$this->_order->addStatusHistoryComment($comment)->setIsCustomerNotified(true)->setEntityName('order');
+					$this->_order->save();
+				}	
+
+				if ($this->_order->getState() == \Magento\Sales\Model\Order::STATE_PROCESSING || $this->_order->getState() == \Magento\Sales\Model\Order::STATE_COMPLETE){
+					$this->_logger->info("Multibanco Transaction captured. Status updated for " . $idformerchant);
+					header('HTTP/1.1 200 OK');
+					echo "Transaction captured. Status updated for Multibanco transaction $idformerchant." . PHP_EOL;
+				} else {
+					header('HTTP/1.1 500 Internal Server Error');
+					$this->_logger->error("An error occurred while processing Multibanco capture request: " . $idformerchant);
+					echo "An error occurred while updating the Multibanco transaction: " . $idformerchant;
+					exit;
+				}			
+				
+			} 
+			
+		} catch (\Exception $e){
+		
+			header('HTTP/1.1 500 Internal Server Error');
+			$this->_logger->error("An error occurred while processing a notification request: " . $e->getMessage());
+			echo "An error occurred while processing a notification request: " . $e->getMessage();
+			exit;			
+		}
 	}
 	
 	
@@ -118,8 +140,6 @@ class Index extends AppAction
 
 		return false;			
 		
-	}
-	
-	
+	}	
 }
 	

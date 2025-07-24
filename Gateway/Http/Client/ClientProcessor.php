@@ -24,20 +24,16 @@ class ClientProcessor implements ClientInterface
 	private $ws_url;
 	private $expiry;
 	
-    /**
-     * @var array
-     */
     private $results = [
         self::SUCCESS,
         self::FAILURE
     ];
 
-    /**
-     * @var Logger
-     */
     private $logger;
 	private $soapClientFactory;
-
+	private $storeManager;
+	private $urlBuilder;
+	
     /**
      * @param Logger $logger
      */
