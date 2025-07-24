@@ -55,8 +55,9 @@ class Index extends AppAction
 				$this->_credentials		= $this->_objectManager->get('Magento\Framework\App\Config\ScopeConfigInterface')->getValue('payment/hipay_multibanco_gateway/api_production',$storeScope);
 			
 			$hipayTransaction = $this->getTransactionStatus($reference);
+			$dataCheck = $this->checkTransactionData( $entity, $reference );
 			
-			if ($hipayTransaction ){
+			if ($hipayTransaction && $dataCheck){
 
 				$this->_logger->info("Multibanco Transaction identified for capture" . $idformerchant);
 				echo "Multibanco Transaction identified for capture " . $idformerchant . PHP_EOL;
@@ -78,7 +79,13 @@ class Index extends AppAction
 					exit;
 				}			
 				
-			} 
+			} else {
+				header('HTTP/1.1 500 Internal Server Error');
+				$this->_logger->error("Error processing Multibanco capture, data does not match: " . $idformerchant);
+				echo "Error processing Multibanco capture, data does not match: " . $idformerchant;
+				exit;
+			}
+			
 			
 		} catch (\Exception $e){
 		
@@ -124,12 +131,12 @@ class Index extends AppAction
 			$paid = $res->paid;
 			if ($paid)
 			{
-				echo "PAID";
+				echo "Reference is checked as paid";
 				return true;
 
 			} else
 			{
-				echo "NOT PAID";
+				echo "Reference check as NOT paid";
 				return false;
 			}
 		}
@@ -141,5 +148,24 @@ class Index extends AppAction
 		return false;			
 		
 	}	
+
+
+    protected function checkTransactionData($entity, $reference)
+    {
+
+		if ( $this->_payment->getMethod() != "hipay_multibanco_gateway") {
+			$this->_logger->error("Payment method does not match: hipay_multibanco_gateway");	
+			return false;
+		}		
+
+		if ( $this->_payment->getAdditionalInformation('MB_Entity') != $entity || $this->_payment->getAdditionalInformation('MB_Reference') != $reference ){
+			$this->_logger->error("Payment data like Multibanco entity and reference do not match: hipay_multibanco_gateway");	
+			return false;
+		}
+		return true;
+
+    }
+
+
 }
 	
